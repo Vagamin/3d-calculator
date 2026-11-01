@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор себестоимости 3D-печати</title>
+    <meta name="description" content="Расчёт себестоимости и цены 3D-печати с выгрузкой в PDF">
+    <meta name="theme-color" content="#0d47a1">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="3D Калькулятор">
+
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+    <script defer src="libs/html2canvas.min.js"></script>
+    <script defer src="libs/jspdf.umd.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #1565c0;
+            --primary-dark: #0d47a1;
+            --primary-soft: #eaf2fc;
+            --focus-ring: rgba(21, 101, 192, .15);
+            --text: #253448;
+            --muted: #69798d;
+            --border: #dce5ef;
+            --surface: #fff;
+            --soft: #f6f9fd;
+
+            --radius-lg: 16px;
+            --radius: 12px;
+            --radius-sm: 8px;
+
+            --shadow-lg: 0 18px 50px rgba(24, 49, 83, .12);
+            --shadow-sm: 0 4px 16px rgba(24, 49, 83, .06);
+
+            --space: 24px;
+            --transition: .2s ease;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            overflow-x: hidden;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            color: var(--text);
+            font-family: "Segoe UI", system-ui, Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.4;
+            background: linear-gradient(135deg, #f5f7fb, #e8eef6);
+        }
+
+        /* ---------- Панель масштаба ---------- */
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            max-width: 980px;
+            margin: 0 auto 10px;
+        }
+
+        .install-btn {
+            padding: 7px 14px;
+            font-size: 13px;
+        }
+
+        .install-btn[hidden],
+        .install-note[hidden] {
+            display: none;
+        }
+
+        .install-note {
+            max-width: 980px;
+            margin: 0 auto 10px;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--primary);
+            border-radius: var(--radius);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .zoom-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .zoom-control input {
+            width: 112px;
+            margin: 0;
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        .zoom-control output {
+            min-width: 38px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ---------- Каркас ---------- */
+
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+            overflow: hidden;
+            border-radius: 20px;
+            background: var(--surface);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .page-header {
+            padding: 36px 40px;
+            color: #fff;
+            text-align: center;
+            background: linear-gradient(115deg, var(--primary-dark), var(--primary) 65%, #2581d5);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: clamp(24px, 4vw, 34px);
+            line-height: 1.2;
+            overflow-wrap: anywhere;
+        }
+
+        .subtitle {
+            margin: 8px 0 0;
+            font-size: 16px;
+            opacity: .9;
+        }
+
+        .main-content {
+            padding: 36px 44px 44px;
+        }
+
+        .form {
+            display: grid;
+            gap: 20px;
+        }
+
+        /* ---------- Карточки разделов ---------- */
+
+        .card {
+            min-width: 0;
+            padding: 22px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            background: var(--soft);
+        }
+
+        .card-title {
+            margin: 0;
+            color: var(--primary-dark);
+            font-size: 17px;
+            font-weight: 700;
+        }
+
+        .hint {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+        .fields {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 18px 20px;
+            margin-top: 16px;
+        }
+
+        .field {
+            min-width: 0;
+        }
+
+        .field-wide {
+            grid-column: 1 / -1;
+        }
+
+        .field-label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 14px;
+            font-weight: 600;
+            overflow-wrap: anywhere;
+        }
+
+        .field .hint {
+            margin-top: 5px;
+        }
+
+        /* ---------- Поля ввода ---------- */
+
+        .control,
+        .input-group {
+            width: 100%;
+            min-width: 0;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--surface);
+            transition: border-color var(--transition), box-shadow var(--transition);
+        }
+
+        .control {
+            display: block;
+            padding: 12px 14px;
+            outline: none;
+            color: var(--text);
+            font: inherit;
+        }
+
+        textarea.control {
+            min-height: 96px;
+            margin-top: 14px;
+            line-height: 1.5;
+            resize: vertical;
+        }
+
+        .control:focus,
+        .input-group:focus-within {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--focus-ring);
+        }
+
+        .input-group {
+            display: flex;
+            overflow: hidden;
+        }
+
+        .input-group .control {
+            flex: 1;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        .unit {
+            display: flex;
+            align-items: center;
+            padding: 0 14px;
+            border-left: 1px solid var(--border);
+            background: var(--soft);
+            color: var(--muted);
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        /* ---------- Переключатель ---------- */
+
+        .switch-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            margin-top: 18px;
+            padding: 16px 18px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--surface);
+            cursor: pointer;
+            transition: border-color var(--transition), box-shadow var(--transition);
+        }
+
+        .switch-row:hover,
+        .switch-row:focus-within {
+            border-color: var(--primary);
+        }
+
+        .switch-text {
+            min-width: 0;
+        }
+
+        .switch-text .hint {
+            display: block;
+        }
+
+        .switch-title {
+            display: block;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .switch {
+            position: relative;
+            flex: 0 0 50px;
+            height: 28px;
+        }
+
+        .switch input {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .switch-track {
+            display: block;
+            height: 100%;
+            border-radius: 14px;
+            background: #a8b6c8;
+            transition: background var(--transition);
+        }
+
+        .switch-track::after {
+            content: "";
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, .18);
+            transition: transform var(--transition);
+        }
+
+        .switch input:checked + .switch-track {
+            background: var(--primary);
+        }
+
+        .switch input:checked + .switch-track::after {
+            transform: translateX(22px);
+        }
+
+        .switch input:focus-visible + .switch-track {
+            box-shadow: 0 0 0 3px var(--focus-ring);
+        }
+
+        /* ---------- Кнопки ---------- */
+
+        .btn-group {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .btn {
+            padding: 14px 26px;
+            border: 1.5px solid var(--primary);
+            border-radius: var(--radius);
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background var(--transition), color var(--transition), transform var(--transition);
+        }
+
+        .btn:not(:disabled):hover {
+            transform: translateY(-2px);
+        }
+
+        .btn:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px var(--focus-ring);
+        }
+
+        .btn:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .btn-primary:not(:disabled):hover {
+            border-color: var(--primary-dark);
+            background: var(--primary-dark);
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--primary);
+        }
+
+        .btn-secondary:not(:disabled):hover {
+            background: var(--primary-soft);
+        }
+
+        /* ---------- Результат ---------- */
+
+        #result {
+            margin-top: 32px;
+            container-type: inline-size;
+        }
+
+        .result-empty {
+            padding: 28px 22px;
+            border: 1.5px dashed var(--border);
+            border-radius: var(--radius-lg);
+            background: var(--soft);
+            color: var(--muted);
+            text-align: center;
+        }
+
+        .invoice {
+            position: relative;
+            overflow: hidden;
+            padding: 36px;
+            border: 1px solid var(--border);
+            border-top: 6px solid var(--primary);
+            border-radius: var(--radius-lg);
+            background: var(--surface);
+            color: var(--text);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .invoice > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .invoice > .watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            z-index: 0;
+            transform: translate(-50%, -50%) rotate(-35deg);
+            color: rgba(21, 101, 192, .06);
+            font-size: 64px;
+            font-weight: 900;
+            letter-spacing: 6px;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
+        .invoice-head {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 14px 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .invoice-head > * {
+            min-width: 0;
+        }
+
+        .invoice-company {
+            color: var(--primary-dark);
+            font-size: 24px;
+            font-weight: 700;
+            overflow-wrap: anywhere;
+        }
+
+        .invoice-slogan {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 15px;
+            font-style: italic;
+            overflow-wrap: anywhere;
+        }
+
+        .invoice-doc {
+            text-align: right;
+        }
+
+        .invoice-title {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .invoice-meta {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .nowrap,
+        .money {
+            white-space: nowrap;
+        }
+
+        .invoice-order {
+            margin-top: 22px;
+            padding: 14px 18px;
+            border-left: 4px solid var(--primary);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            background: var(--primary-soft);
+        }
+
+        .invoice-order-title {
+            margin-bottom: 6px;
+            color: var(--primary-dark);
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .invoice-order-text {
+            margin: 0;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .invoice-table {
+            width: 100%;
+            margin-top: 24px;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .invoice-table th,
+        .invoice-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            overflow-wrap: anywhere;
+        }
+
+        .invoice-table th {
+            background: var(--primary-soft);
+            color: var(--primary-dark);
+            font-size: 13px;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+        }
+
+        .invoice-table th:last-child,
+        .invoice-table td:last-child {
+            width: 34%;
+            text-align: right;
+        }
+
+        .invoice-table td:last-child {
+            color: var(--primary-dark);
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .summary {
+            max-width: 440px;
+            margin: 22px 0 0 auto;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 6px 0;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .summary-row strong {
+            text-align: right;
+        }
+
+        /* align-items: center вместо baseline — html2canvas неверно рендерит baseline-выравнивание в PDF */
+        .summary-total {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px 16px;
+            min-height: 58px;
+            margin: 12px 0 8px;
+            padding: 12px 18px;
+            border-radius: var(--radius);
+            background: var(--primary);
+            color: #fff;
+            font-weight: 700;
+        }
+
+        .summary-total > span,
+        .summary-total > strong {
+            display: block;
+            line-height: 1.2;
+        }
+
+        .summary-total .money {
+            display: block;
+            font-size: 24px;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+
+        .summary-extra {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .summary-extra strong {
+            color: var(--text);
+        }
+
+        /* Узкая область результата (телефон). PDF рендерится в 760px, поэтому сюда не попадает. */
+        @container (max-width: 560px) {
+            .invoice {
+                padding: 18px 16px;
+            }
+
+            .invoice > .watermark {
+                font-size: 40px;
+            }
+
+            .invoice-company {
+                font-size: 20px;
+            }
+
+            .invoice-doc {
+                text-align: left;
+            }
+
+            .invoice-title {
+                font-size: 18px;
+            }
+
+            .invoice-table {
+                font-size: 14px;
+            }
+
+            .invoice-table th,
+            .invoice-table td {
+                padding: 10px 8px;
+            }
+
+            .invoice-table th:last-child,
+            .invoice-table td:last-child {
+                width: 42%;
+            }
+
+            .summary {
+                max-width: none;
+                font-size: 15px;
+            }
+
+            .summary-total {
+                flex-wrap: wrap;
+            }
+
+            .summary-total .money {
+                font-size: 20px;
+            }
+        }
+
+        .pdf-stage {
+            position: fixed;
+            top: 0;
+            left: -10000px;
+            width: 760px;
+            container-type: inline-size;
+        }
+
+        .pdf-stage .invoice {
+            box-shadow: none;
+        }
+
+        /* ---------- Адаптив ---------- */
+
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                border-radius: var(--radius-lg);
+            }
+
+            .page-header {
+                padding: 26px 18px;
+            }
+
+            .subtitle {
+                font-size: 15px;
+            }
+
+            .main-content {
+                padding: 20px 14px 24px;
+            }
+
+            .form {
+                gap: 14px;
+            }
+
+            .card {
+                padding: 16px;
+            }
+
+            .fields {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 14px;
+            }
+
+            .switch-row {
+                gap: 12px;
+                padding: 14px;
+            }
+
+            .btn {
+                width: 100%;
+            }
+
+            #result {
+                margin-top: 24px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="toolbar">
+        <button type="button" id="installBtn" class="btn btn-primary install-btn" hidden>⬇ Установить приложение</button>
+        <div class="zoom-control">
+            <label for="pageZoom">Масштаб</label>
+            <input type="range" id="pageZoom" min="70" max="130" step="5" value="100">
+            <output id="zoomValue" for="pageZoom">100%</output>
+        </div>
+    </div>
+
+    <div class="install-note" id="installNote" role="status" hidden></div>
+
+    <div class="page-shell" id="pageShell">
+        <main class="container">
+            <header class="page-header">
+                <h1>Калькулятор себестоимости 3D-печати</h1>
+                <p class="subtitle">Расчёт в рублях (₽)</p>
+            </header>
+
+            <div class="main-content">
+                <form class="form" id="calcForm" novalidate>
+                    <section class="card" aria-labelledby="orderHeading">
+                        <h2 class="card-title" id="orderHeading">Описание заказа</h2>
+                        <p class="hint">Необязательно. Описание появится в калькуляции и PDF.</p>
+                        <textarea class="control" id="orderDescription" maxlength="1000"
+                            aria-labelledby="orderHeading"
+                            placeholder="Например: корпус для электронного устройства, пластик PETG, чёрный цвет..."></textarea>
+                    </section>
+
+                    <section class="card" aria-labelledby="materialHeading">
+                        <h2 class="card-title" id="materialHeading">Материал</h2>
+                        <div class="fields">
+                            <div class="field">
+                                <label class="field-label" for="weight">Вес одного изделия</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="weight" value="25" min="0" step="0.1" inputmode="decimal">
+                                    <span class="unit">г</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="filPrice">Цена филамента</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="filPrice" value="8500" min="0" step="0.01" inputmode="decimal">
+                                    <span class="unit">₽/кг</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="waste">Потери филамента</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="waste" value="12" min="0" step="0.1" inputmode="decimal">
+                                    <span class="unit">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="card" aria-labelledby="energyHeading">
+                        <h2 class="card-title" id="energyHeading">Печать, сушка и электроэнергия</h2>
+                        <div class="fields">
+                            <div class="field">
+                                <label class="field-label" for="hoursPrint">Время печати одного изделия</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="hoursPrint" value="4.5" min="0" step="0.1" inputmode="decimal">
+                                    <span class="unit">ч</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="hoursDryer">Время сушки одного изделия</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="hoursDryer" value="2" min="0" step="0.1" inputmode="decimal">
+                                    <span class="unit">ч</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="powerPrinter">Мощность принтера</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="powerPrinter" value="220" min="0" step="0.1" inputmode="decimal">
+                                    <span class="unit">Вт</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="powerDryer">Мощность сушилки</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="powerDryer" value="80" min="0" step="0.1" inputmode="decimal">
+                                    <span class="unit">Вт</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="energyPrice">Тариф электроэнергии</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="energyPrice" value="5.5" min="0" step="0.01" inputmode="decimal">
+                                    <span class="unit">₽/кВт·ч</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="card" aria-labelledby="workHeading">
+                        <h2 class="card-title" id="workHeading">Амортизация и работа</h2>
+                        <div class="fields">
+                            <div class="field">
+                                <label class="field-label" for="amortPrinter">Амортизация принтера</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="amortPrinter" value="45" min="0" step="0.01" inputmode="decimal">
+                                    <span class="unit">₽/ч</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="amortDryer">Амортизация сушилки</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="amortDryer" value="12" min="0" step="0.01" inputmode="decimal">
+                                    <span class="unit">₽/ч</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="laborCost">Работа оператора</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="laborCost" value="1800" min="0" step="0.01" inputmode="decimal">
+                                    <span class="unit">₽/ч</span>
+                                </div>
+                                <p class="hint">Учитывается время печати и сушки.</p>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="postprocess">Постобработка одного изделия</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="postprocess" value="800" min="0" step="0.01" inputmode="decimal">
+                                    <span class="unit">₽</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="card" aria-labelledby="orderParamsHeading">
+                        <h2 class="card-title" id="orderParamsHeading">Тираж и наценка</h2>
+                        <div class="fields">
+                            <div class="field">
+                                <label class="field-label" for="quantity">Количество изделий</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="quantity" value="1" min="1" step="1" inputmode="numeric">
+                                    <span class="unit">шт.</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="markup">Наценка / прибыль</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="markup" value="85" min="0" step="0.1" inputmode="decimal">
+                                    <span class="unit">%</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="modelDev">Разработка мастер-модели</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="modelDev" value="12000" min="0" step="0.01" inputmode="decimal">
+                                    <span class="unit">₽</span>
+                                </div>
+                                <p class="hint">Разово, на весь тираж.</p>
+                            </div>
+                        </div>
+
+                        <label class="switch-row" for="oneTimePrototype">
+                            <span class="switch-text">
+                                <span class="switch-title">Разовый прототип</span>
+                                <span class="hint">
+                                    Разработка модели оплачивается отдельно, без наценки.
+                                    Если выключить — стоимость разработки войдёт в себестоимость тиража,
+                                    и на неё будет начислена наценка.
+                                </span>
+                            </span>
+                            <span class="switch">
+                                <input type="checkbox" id="oneTimePrototype" checked>
+                                <span class="switch-track"></span>
+                            </span>
+                        </label>
+                    </section>
+
+                    <section class="card" aria-labelledby="expensesHeading">
+                        <h2 class="card-title" id="expensesHeading">Другие расходы</h2>
+                        <p class="hint">Сумма за весь заказ прибавляется к итогу без наценки.</p>
+                        <div class="fields">
+                            <div class="field">
+                                <label class="field-label" for="otherExpenses">Сумма</label>
+                                <div class="input-group">
+                                    <input class="control" type="number" id="otherExpenses" value="0" min="0" step="0.01" inputmode="decimal">
+                                    <span class="unit">₽</span>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="otherExpensesDescription">Описание (необязательно)</label>
+                                <input class="control" type="text" id="otherExpensesDescription" maxlength="160"
+                                    placeholder="Например: доставка материалов">
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="card" aria-labelledby="brandHeading">
+                        <h2 class="card-title" id="brandHeading">Оформление документа</h2>
+                        <div class="fields">
+                            <div class="field">
+                                <label class="field-label" for="copyright">Название компании</label>
+                                <input class="control" type="text" id="copyright" value="3D-печать" maxlength="80">
+                                <p class="hint">Используется в шапке и водяном знаке.</p>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="slogan">Слоган</label>
+                                <input class="control" type="text" id="slogan" value="Расчёт стоимости изготовления" maxlength="160">
+                            </div>
+                        </div>
+                    </section>
+
+                    <div class="btn-group">
+                        <button type="submit" id="calcBtn" class="btn btn-primary">Рассчитать стоимость</button>
+                        <button type="button" id="savePdf" class="btn btn-secondary" disabled>Сохранить в PDF</button>
+                    </div>
+                </form>
+
+                <div id="result" aria-live="polite">
+                    <div class="result-empty">Заполните поля и нажмите «Рассчитать стоимость»</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        const STORAGE_KEY = 'calculator3DForm_v1';
+        const ZOOM_KEY = 'calculatorPageZoom';
+        const DEFAULT_COMPANY = '3D-печать';
+        const DEFAULT_SLOGAN = 'Расчёт стоимости изготовления';
+        const PDF_BUTTON_TEXT = 'Сохранить в PDF';
+
+        const form = $('calcForm');
+        const result = $('result');
+        const savePdfBtn = $('savePdf');
+        const pageZoom = $('pageZoom');
+        const pageShell = $('pageShell');
+        const zoomValue = $('zoomValue');
+        const phoneQuery = window.matchMedia('(max-width: 600px)');
+
+        const fields = [...form.querySelectorAll('input[id], textarea[id]')];
+
+        const moneyFormat = new Intl.NumberFormat('ru-RU', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        const dateFormat = new Intl.DateTimeFormat('ru-RU', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        });
+        const timeFormat = new Intl.DateTimeFormat('ru-RU', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+
+        const rub = value => `<span class="money">${moneyFormat.format(value)}&nbsp;₽</span>`;
+
+        const num = id => {
+            const value = Number($(id).value);
+            return Number.isFinite(value) ? Math.max(0, value) : 0;
+        };
+
+        const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
+
+        const storage = {
+            get(key) {
+                try {
+                    return localStorage.getItem(key);
+                } catch {
+                    return null;
+                }
+            },
+            set(key, value) {
+                try {
+                    localStorage.setItem(key, value);
+                } catch {
+                    // Без localStorage калькулятор работает, но не запоминает данные.
+                }
+            }
+        };
+
+        /* ---------- Сохранение формы ---------- */
+
+        function saveForm() {
+            const values = {};
+
+            for (const el of fields) {
+                values[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+            }
+
+            storage.set(STORAGE_KEY, JSON.stringify({
+                fields: values,
+                calculated: Boolean($('invoiceContent'))
+            }));
+        }
+
+        function restoreForm() {
+            try {
+                const saved = JSON.parse(storage.get(STORAGE_KEY));
+                if (!saved?.fields) return false;
+
+                for (const el of fields) {
+                    if (!Object.hasOwn(saved.fields, el.id)) continue;
+
+                    if (el.type === 'checkbox') {
+                        el.checked = saved.fields[el.id] === true;
+                    } else {
+                        el.value = String(saved.fields[el.id] ?? '');
+                    }
+                }
+
+                return saved.calculated === true;
+            } catch {
+                return false;
+            }
+        }
+
+        /* ---------- Масштаб ---------- */
+
+        function updatePageZoom() {
+            const scale = Number(pageZoom.value) / 100;
+            const applied = phoneQuery.matches ? Math.min(scale, 1) : scale;
+
+            pageShell.style.zoom = applied;
+            zoomValue.textContent = `${Math.round(applied * 100)}%`;
+        }
+
+        /* ---------- Расчёт ---------- */
+
+        function computeCost() {
+            const qty = Math.max(1, Math.floor(num('quantity')));
+            const weight = num('weight');
+            const hoursPrint = num('hoursPrint');
+            const hoursDryer = num('hoursDryer');
+            const energyPrice = num('energyPrice');
+            const modelDev = num('modelDev');
+            const otherExpenses = num('otherExpenses');
+            const markup = num('markup');
+            const oneTimePrototype = $('oneTimePrototype').checked;
+
+            const items = [
+                {
+                    name: `Филамент с потерями × ${qty} шт.`,
+                    amount: weight / 1000 * num('filPrice') * (1 + num('waste') / 100) * qty
+                },
+                {
+                    name: 'Электроэнергия печати',
+                    amount: num('powerPrinter') / 1000 * hoursPrint * energyPrice * qty
+                },
+                {
+                    name: 'Электроэнергия сушки',
+                    amount: num('powerDryer') / 1000 * hoursDryer * energyPrice * qty
+                },
+                {
+                    name: 'Амортизация принтера',
+                    amount: num('amortPrinter') * hoursPrint * qty
+                },
+                {
+                    name: 'Амортизация сушилки',
+                    amount: num('amortDryer') * hoursDryer * qty
+                },
+                {
+                    name: 'Работа оператора',
+                    amount: num('laborCost') * (hoursPrint + hoursDryer) * qty
+                },
+                {
+                    name: `Постобработка × ${qty} шт.`,
+                    amount: num('postprocess') * qty
+                }
+            ];
+
+            const directCost = items.reduce((sum, item) => sum + item.amount, 0);
+            const costBase = directCost + (oneTimePrototype ? 0 : modelDev);
+            const profit = costBase * markup / 100;
+            const modelOutsideMarkup = oneTimePrototype ? modelDev : 0;
+            const total = costBase + profit + modelOutsideMarkup + otherExpenses;
+
+            if (modelDev > 0) {
+                items.push({
+                    name: oneTimePrototype
+                        ? 'Разработка мастер-модели (разово, без наценки)'
+                        : 'Разработка мастер-модели (в себестоимости)',
+                    amount: modelDev
+                });
+            }
+
+            if (otherExpenses > 0) {
+                const description = $('otherExpensesDescription').value.trim();
+                items.push({
+                    name: description ? `Другие расходы: ${description}` : 'Другие расходы',
+                    amount: otherExpenses
+                });
+            }
+
+            return {
+                qty,
+                markup,
+                items: items.filter(item => item.amount >= 0.005),
+                costBase,
+                profit,
+                modelOutsideMarkup,
+                otherExpenses,
+                total,
+                pricePerItem: total / qty,
+                pricePerGram: weight > 0 ? total / (weight * qty) : null
+            };
+        }
+
+        function summaryRow(label, value, className = 'summary-row') {
+            return `<div class="${className}"><span>${label}</span><strong>${value}</strong></div>`;
+        }
+
+        function renderInvoice(data) {
+            const now = new Date();
+            const company = $('copyright').value.trim() || DEFAULT_COMPANY;
+            const slogan = $('slogan').value.trim() || DEFAULT_SLOGAN;
+            const order = $('orderDescription').value.trim();
+
+            const rows = data.items
+                .map(item => `<tr><td>${escapeHtml(item.name)}</td><td>${rub(item.amount)}</td></tr>`)
+                .join('');
+
+            result.innerHTML = `
+                <article class="invoice" id="invoiceContent">
+                    <div class="watermark" aria-hidden="true">${escapeHtml(company)}</div>
+
+                    <header class="invoice-head">
+                        <div>
+                            <div class="invoice-company">${escapeHtml(company)} © ${now.getFullYear()}</div>
+                            <div class="invoice-slogan">${escapeHtml(slogan)}</div>
+                        </div>
+                        <div class="invoice-doc">
+                            <div class="invoice-title">Калькуляция заказа</div>
+                            <div class="invoice-meta">
+                                Сформирован:
+                                <span class="nowrap">${dateFormat.format(now)}&nbsp;•&nbsp;${timeFormat.format(now)}</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    ${order ? `
+                        <div class="invoice-order">
+                            <div class="invoice-order-title">Описание заказа</div>
+                            <p class="invoice-order-text">${escapeHtml(order)}</p>
+                        </div>` : ''}
+
+                    <table class="invoice-table">
+                        <thead>
+                            <tr><th>Наименование</th><th>Сумма</th></tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+
+                    <div class="summary">
+                        ${summaryRow('Себестоимость тиража', rub(data.costBase))}
+                        ${summaryRow(`Наценка (${data.markup.toLocaleString('ru-RU')}&nbsp;%)`, rub(data.profit))}
+                        ${data.modelOutsideMarkup > 0
+                            ? summaryRow('Разработка модели без наценки', rub(data.modelOutsideMarkup))
+                            : ''}
+                        ${data.otherExpenses > 0
+                            ? summaryRow('Другие расходы', rub(data.otherExpenses))
+                            : ''}
+                        ${summaryRow('ИТОГО К ОПЛАТЕ', rub(data.total), 'summary-total')}
+                        ${data.qty > 1
+                            ? summaryRow('Цена за 1 изделие', rub(data.pricePerItem), 'summary-row summary-extra')
+                            : ''}
+                        ${data.pricePerGram !== null
+                            ? summaryRow('Цена за 1 грамм', `${rub(data.pricePerGram)}/г`, 'summary-row summary-extra')
+                            : ''}
+                    </div>
+                </article>
+            `;
+        }
+
+        function calculate() {
+            renderInvoice(computeCost());
+            savePdfBtn.disabled = false;
+            saveForm();
+        }
+
+        /* ---------- PDF ---------- */
+
+        function localDateStamp(date = new Date()) {
+            const pad = value => String(value).padStart(2, '0');
+            return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+        }
+
+        async function savePdf() {
+            const invoice = $('invoiceContent');
+            if (!invoice) return;
+
+            if (!window.html2canvas || !window.jspdf?.jsPDF) {
+                alert('Не удалось загрузить библиотеки для создания PDF. Обновите страницу.');
+                return;
+            }
+
+            savePdfBtn.disabled = true;
+            savePdfBtn.textContent = 'Создаётся PDF...';
+
+            // Копия рендерится в контейнере фиксированной ширины 760px,
+            // поэтому PDF всегда выглядит одинаково — и на ПК, и на телефоне.
+            const stage = document.createElement('div');
+            const copy = invoice.cloneNode(true);
+            stage.className = 'pdf-stage';
+            copy.id = 'pdfInvoiceCopy';
+            stage.appendChild(copy);
+            document.body.appendChild(stage);
+
+            try {
+                await document.fonts?.ready;
+
+                const canvas = await html2canvas(copy, {
+                    scale: 2,
+                    backgroundColor: '#ffffff',
+                    logging: false,
+                    windowWidth: 1200,
+                    onclone: doc => {
+                        const clonedStage = doc.querySelector('.pdf-stage');
+                        if (clonedStage) clonedStage.style.position = 'static';
+                    }
+                });
+
+                const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                const margin = 10;
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+
+                const ratio = Math.min(
+                    (pageWidth - margin * 2) / canvas.width,
+                    (pageHeight - margin * 2) / canvas.height
+                );
+                const imageWidth = canvas.width * ratio;
+                const imageHeight = canvas.height * ratio;
+
+                pdf.addImage(
+                    canvas.toDataURL('image/jpeg', 0.95),
+                    'JPEG',
+                    (pageWidth - imageWidth) / 2,
+                    margin,
+                    imageWidth,
+                    imageHeight
+                );
+
+                const fileName = `Калькуляция_3D_${localDateStamp()}.pdf`;
+                await deliverPdf(pdf, fileName);
+            } catch (error) {
+                if (error?.name === 'AbortError') return;
+                console.error(error);
+                alert('Ошибка при создании PDF.');
+            } finally {
+                stage.remove();
+                savePdfBtn.disabled = false;
+                savePdfBtn.textContent = PDF_BUTTON_TEXT;
+            }
+        }
+
+        // На телефоне открываем системное меню «Поделиться» (Telegram, почта, «Файлы»),
+        // на ПК — обычное скачивание.
+        async function deliverPdf(pdf, fileName) {
+            const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+
+            if (isTouchDevice && navigator.canShare) {
+                const file = new File([pdf.output('blob')], fileName, { type: 'application/pdf' });
+
+                if (navigator.canShare({ files: [file] })) {
+                    await navigator.share({ files: [file], title: fileName });
+                    return;
+                }
+            }
+
+            pdf.save(fileName);
+        }
+
+        /* ---------- Инициализация ---------- */
+
+        const savedZoom = Number(storage.get(ZOOM_KEY));
+        if (savedZoom >= 70 && savedZoom <= 130) {
+            pageZoom.value = savedZoom;
+        }
+
+        const shouldRestoreCalculation = restoreForm();
+
+        let recalcTimer;
+        form.addEventListener('input', () => {
+            saveForm();
+
+            // Если калькуляция уже показана — обновляем её, чтобы в PDF не попали устаревшие цифры.
+            if ($('invoiceContent')) {
+                clearTimeout(recalcTimer);
+                recalcTimer = setTimeout(calculate, 250);
+            }
+        });
+
+        form.addEventListener('submit', event => {
+            event.preventDefault();
+            clearTimeout(recalcTimer);
+            calculate();
+        });
+
+        savePdfBtn.addEventListener('click', savePdf);
+
+        pageZoom.addEventListener('input', () => {
+            updatePageZoom();
+            storage.set(ZOOM_KEY, pageZoom.value);
+        });
+
+        phoneQuery.addEventListener('change', updatePageZoom);
+
+        updatePageZoom();
+
+        if (shouldRestoreCalculation) {
+            calculate();
+        }
+
+        /* ---------- PWA: офлайн-режим и установка ---------- */
+
+        const installBtn = $('installBtn');
+        const installNote = $('installNote');
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+            || navigator.standalone === true;
+        let deferredInstallPrompt = null;
+
+        function showInstallNote(html) {
+            installNote.innerHTML = html;
+            installNote.hidden = false;
+        }
+
+        if (!isStandalone) {
+            if (location.protocol === 'file:') {
+                showInstallNote('Файл открыт с диска — установка невозможна. ' +
+                    'Откройте приложение по адресу <b>https://…</b> с хостинга (Netlify / GitHub Pages).');
+            } else if (!window.isSecureContext) {
+                showInstallNote('Установка доступна только по защищённому адресу <b>https://</b>.');
+            }
+
+            window.addEventListener('beforeinstallprompt', event => {
+                event.preventDefault();
+                deferredInstallPrompt = event;
+                installBtn.hidden = false;
+                installNote.hidden = true;
+            });
+
+            // Если браузер не прислал событие (Firefox, Яндекс, Samsung Internet, iOS),
+            // показываем ручную инструкцию.
+            setTimeout(() => {
+                if (deferredInstallPrompt || !installNote.hidden || !window.isSecureContext) return;
+
+                const ua = navigator.userAgent;
+                const isIOS = /iPhone|iPad|iPod/.test(ua);
+                const isAndroid = /Android/.test(ua);
+
+                let hint;
+                if (isIOS) {
+                    hint = 'В Safari нажмите «Поделиться» ⎋ → «На экран „Домой“».';
+                } else if (isAndroid) {
+                    hint = 'Откройте меню браузера ⋮ → «Установить приложение» или «Добавить на главный экран». ' +
+                        'Лучше всего работает в Google Chrome.';
+                } else {
+                    hint = 'Откройте страницу в Chrome или Edge и нажмите значок установки в адресной строке ' +
+                        'или меню ⋮ → «Сохранить и поделиться» / «Приложения» → «Установить».';
+                }
+
+                installBtn.hidden = false;
+                installBtn.dataset.hint = hint;
+            }, 4000);
+        }
+
+        installBtn.addEventListener('click', async () => {
+            if (deferredInstallPrompt) {
+                deferredInstallPrompt.prompt();
+                await deferredInstallPrompt.userChoice;
+                deferredInstallPrompt = null;
+                installBtn.hidden = true;
+                return;
+            }
+
+            showInstallNote(installBtn.dataset.hint || 'Используйте меню браузера → «Установить приложение».');
+        });
+
+        window.addEventListener('appinstalled', () => {
+            installBtn.hidden = true;
+            installNote.hidden = true;
+        });
+
+        if ('serviceWorker' in navigator && window.isSecureContext) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(error => {
+                    console.warn('Service worker не зарегистрирован:', error);
+                });
+            });
+        }
+    </script>
+</body>
+
+</html>
